@@ -3,13 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-// read in the parameters for the computation
-
-// Global Domain Size
-float Dx = 1;
-float Dy = 1;
-float Dz = 1;
+#include <time.h>
 
 // array indexing macros
 #define Ex(i,j,k) (Ex[(i) + NX*(j) + NX*NY*(k)])
@@ -18,16 +12,17 @@ float Dz = 1;
 #define Hx(i,j,k) (Hx[(i) + NX*(j) + NX*NY*(k)])
 #define Hy(i,j,k) (Hy[(i) + NX*(j) + NX*NY*(k)])
 #define Hz(i,j,k) (Hz[(i) + NX*(j) + NX*NY*(k)])
+#define field(i,j,k) (field[(i) + NX*(j) + NX*NY*(k)])
 
 // Number of nodes in each direction
 #ifndef NX
-#define NX 6
+#define NX 11
 #endif
 #ifndef NY
-#define NY 6
+#define NY 11
 #endif
 #ifndef NZ
-#define NZ 6
+#define NZ 11
 #endif
 
 // Courant Number
@@ -38,8 +33,8 @@ float simtime = 4e-7;
 
 // sample location informatoin struct
 typedef struct sampleLoc{
-    char type[1];
-    char dir[1];
+    char type;
+    char dir;
     int i;
     int j;
     int k;
@@ -47,8 +42,8 @@ typedef struct sampleLoc{
 
 // source information struct
 typedef struct source{
-    char type[1];
-    char dir[1];
+    char type;
+    char dir;
     int i1;
     int i2;
     int j1;
@@ -57,8 +52,84 @@ typedef struct source{
     int k2;
 }source;
 
+// E field updates
+void Eupdate(float * Ex, float * Ey, float * Ez, float * Hx, float * Hy, float * Hz,
+             float * cExy, float * cExz, float * cEyz, float * cEyx, float * cEzx, float * cEzy){
+    int i,j,k;
+    const float c_cExy = *cExy;
+    const float c_cExz = *cExy;
+    const float c_cEyz = *cEyz;
+    const float c_cEyx = *cEyx;
+    const float c_cEzx = *cEzx;
+    const float c_cEzy = *cEzy;
+    // Ex update
+    for (k=1;k<NX-2;k++){
+        for (j=1;j<NY-2;j++){
+            for (i=0;i<NZ-2;i++){
+                Ex(i,j,k) = Ex(i,j,k) + c_cExy * (Hz(i,j,k) - Hz(i,j-1,k)) -
+                                        c_cExz * (Hy(i,j,k) - Hy(i,j,k-1));
+            }
+        }
+    }
+    // Ey update
+    for (k=1;k<NX-2;k++){
+        for (j=0;j<NY-2;j++){
+            for (i=1;i<NZ-2;i++){
+                Ey(i,j,k) = Ey(i,j,k) + c_cEyz * (Hx(i,j,k) - Hx(i,j,k-1)) -
+                                        c_cEyx * (Hz(i,j,k) - Hz(i-1,j,k));
+            }
+        }
+    }
+    // Ez update
+    for (k=0;k<NX-2;k++){
+        for (j=1;j<NY-2;j++){
+            for (i=1;i<NZ-2;i++){
+                Ez(i,j,k) = Ez(i,j,k) + c_cEzx * (Hy(i,j,k) - Hy(i-1,j,k)) -
+                                        c_cEzy * (Hx(i,j,k) - Hx(i,j-1,k));
+            }
+        }
+    }
+    
+}
 
-
+void Hupdate(float * Ex, float * Ey, float * Ez, float * Hx, float * Hy, float * Hz,
+             float * cHxy, float * cHxz, float * cHyz, float * cHyx, float * cHzx, float * cHzy){
+    int i,j,k;
+    const float c_cHxy = *cHxy;
+    const float c_cHxz = *cHxy;
+    const float c_cHyz = *cHyz;
+    const float c_cHyx = *cHyx;
+    const float c_cHzx = *cHzx;
+    const float c_cHzy = *cHzy;
+    // Hx update
+    for (k=1;k<NZ-2;k++){
+        for (j=1;j<NY-2;j++){
+            for (i=0;i<NX-2;i++){
+                Hx(i,j,k) = Hx(i,j,k) - c_cHxy * (Ez(i,j+1,k) - Ez(i,j,k)) +
+                                        c_cHxz * (Ey(i,j,k+1) - Ey(i,j,k));
+            }
+        }
+    }
+    // Hy update
+    for (k=1;k<NZ-2;k++){
+        for (j=0;j<NY-2;j++){
+            for (i=1;i<NX-2;i++){
+                Hy(i,j,k) = Hy(i,j,k) - c_cHyz * (Ex(i,j,k+1) - Ex(i,j,k)) +
+                                        c_cHyx * (Ez(i+1,j,k) - Ez(i,j,k));
+            }
+        }
+    }
+    // Hz update
+    for (k=0;k<NZ-2;k++){
+        for (j=1;j<NY-2;j++){
+            for (i=1;i<NX-2;i++){
+                Hz(i,j,k) = Hz(i,j,k) - c_cHzx * (Ey(i+1,j,k) - Ey(i,j,k)) +
+                                        c_cHzy * (Ex(i,j+1,k) - Ex(i,j,k));
+            }
+        }
+    }
+    
+}
 
 // source function
 void sig(float *t, float *val)
@@ -70,149 +141,37 @@ void sig(float *t, float *val)
     *val = -(mag*exp(-pow(((*t) - to),2)/pow(tw,2))*(2.0*(*t) - 2.0*to))/tw;
 }
 
-
-
-
-void Eupdate(float * Ex, float * Ey, float * Ez, float * Hx, float * Hy, float * Hz,
-             float * cExy, float * cExz, float * cEyz, float * cEyx, float * cEzx, float * cEzy){
+void sourceUpdate(float * field,struct source * src, float * t, float * coef){
     int i,j,k;
-    const float c_cExy = *cExy;
-    const float c_cExz = *cExy;
-    const float c_cEyz = *cEyz;
-    const float c_cEyx = *cEyx;
-    const float c_cEzx = *cEzx;
-    const float c_cEzy = *cEzy;
-    // Ex update
-    // constant_cExy = *    <----------  set to const for speed, *pointer
-    //    % Ex-update  (excludes boundaries)
-    //    for k = 2:nz-1
-    //        for j = 2:ny-1
-    //            for i = 1:nx-1
-    //                Ex(i,j,k) = Ex(i,j,k)+((Hz(i,j,k)-Hz(i,j-1,k))*cexz(j)-...
-    //                                       (Hy(i,j,k)-Hy(i,j,k-1))*cexy(k))*epsxm1(i,j,k);
-    //    end
-    //    end
-    //    end
-    //
-    //    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    //    % Ey-update  (excludes boundaries)
-    //    for k = 2:nz-1
-    //        for j = 1:ny-1
-    //            for i = 2:nx-1
-    //                Ey(i,j,k) = Ey(i,j,k)+((Hx(i,j,k)-Hx(i,j,k-1))*ceyx(k)-...
-    //                                       (Hz(i,j,k)-Hz(i-1,j,k))*ceyz(i))*epsym1(i,j,k);
-    //    end
-    //    end
-    //    end
-    //
-    //    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    //    % Ez-update  (excludes boundaries)
-    //    for k = 1:nz-1
-    //        for j = 2:ny-1
-    //            for i = 2:nx-1
-    //                Ez(i,j,k) = Ez(i,j,k)+((Hy(i,j,k)-Hy(i-1,j,k))*cezy(i)-...
-    //                                       (Hx(i,j,k)-Hx(i,j-1,k))*cezx(j))*epszm1(i,j,k);
-    //    end
-    //    end
-    //    end
-    for (k=1;k<NX-2;k++){
-        for (j=1;j<NY-2;j++){
-            for (i=0;i<NZ-2;i++){
-                Ex(i,j,k) = Ex(i,j,k) + c_cExy * (Hz(i,j,k) - Hz(i,j-1,k)) -
-                c_cExz * (Hy(i,j,k) - Hy(i,j,k-1));
+    float mag;
+    const float c = *coef;
+    sig(t,&mag);
+    for (k=src->k1;k<=src->k2;k++){
+        for (j=src->j1;j<=src->j2;j++){
+            for (i=src->i1;i<=src->j2;i++){
+                field(i,j,k) = field(i,j,k) - c*mag;
             }
         }
     }
-    // Ey update
-    for (k=1;k<NX-2;k++){
-        for (j=0;j<NY-2;j++){
-            for (i=1;i<NZ-2;i++){
-                Ey(i,j,k) = Ey(i,j,k) + c_cEyz * (Hx(i,j,k) - Hx(i,j,k-1)) -
-                c_cEyx * (Hz(i,j,k) - Hz(i-1,j,k));
-            }
-        }
-    }
-    // Ez update
-    for (k=0;k<NX-2;k++){
-        for (j=1;j<NY-2;j++){
-            for (i=1;i<NZ-2;i++){
-                Ez(i,j,k) = Ez(i,j,k) + c_cEzx * (Hy(i,j,k) - Hy(i-1,j,k)) -
-                c_cEzy * (Hx(i,j,k) - Hx(i,j-1,k));
-            }
-        }
-    }
-    
 }
-
-
-
-
-void Hupdate(float * Ex, float * Ey, float * Ez, float * Hx, float * Hy, float * Hz,
-             float * cHxy, float * cHxz, float * cHyz, float * cHyx, float * cHzx, float * cHzy){
-    int i,j,k;
-    const float c_cHxy = *cHxy;
-    const float c_cHxz = *cHxy;
-    const float c_cHyz = *cHyz;
-    const float c_cHyx = *cHyx;
-    const float c_cHzx = *cHzx;
-    const float c_cHzy = *cHzy;
-
-    
-    // Hx update
-    for (k=1;k<NZ-2;k++){
-        for (j=1;j<NY-2;j++){
-            for (i=0;i<NX-2;i++){
-                Hx(i,j,k) = Hx(i,j,k) - c_cHxy * (Ez(i,j+1,k) - Ez(i,j,k)) +
-                c_cHxz * (Ey(i,j,k+1) - Ey(i,j,k));
-            }
-        }
-    }
-    // Hy update
-    for (k=1;k<NZ-2;k++){
-        for (j=0;j<NY-2;j++){
-            for (i=1;i<NX-2;i++){
-                Hy(i,j,k) = Hy(i,j,k) - c_cHyz * (Ex(i,j,k+1) - Ex(i,j,k)) +
-                c_cHyx * (Ez(i+1,j,k) - Ez(i,j,k));
-            }
-        }
-    }
-    // Hz update
-    for (k=0;k<NZ-2;k++){
-        for (j=1;j<NY-2;j++){
-            for (i=1;i<NX-2;i++){
-                Hz(i,j,k) = Hz(i,j,k) - c_cHzx * (Ey(i+1,j,k) - Ey(i,j,k)) +
-                c_cHzy * (Ex(i,j+1,k) - Ex(i,j,k));
-            }
-        }
-    }
-    
-}
-
-
-
-
-
-
 
 
 
 
 int main(){
-    //struct source src;
-    
     // Set up the sampling
     //struct sampleLoc sample;
     struct sampleLoc sloc;
-    strcpy(sloc.type, "E");
-    strcpy(sloc.dir, "z");
-    sloc.i = 3;
-    sloc.j = 3;
-    sloc.k = 3;
+    sloc.type = 'E';
+    sloc.dir = 'z';
+    sloc.i = 2;//ceil(NX/2+1);
+    sloc.j = 2;//ceil(NY/2+1);
+    sloc.k = 2;//ceil(NZ/2+1);
     
     // set up the source
     struct source src;
-    strcpy(src.type, "J");
-    strcpy(src.dir, "z");
+    src.type = 'J';
+    src.dir = 'z';
     src.i1 = 2;
     src.i2 = 2;
     src.j1 = 2;
@@ -228,6 +187,11 @@ int main(){
     float mu= mu_r * mu_o;
     float eps = eps_r * eps_o;
     float c = 1.0/sqrt(mu*eps);
+    
+    // Global Domain Size
+    float Dx = 1;
+    float Dy = 1;
+    float Dz = 1;
     
     // discretization size computation
     float dx=Dx/(NX-1);
@@ -267,8 +231,8 @@ int main(){
     float cJ = dt/eps;
     float cM = dt/mu;
     
-    int i;
     // build an init sampling vector
+    int i,n;
     int N = pow(2, ceil(log(nt)/log(2)))*2;
     float * sample = malloc(N*sizeof(float));
     for (i=0;i<N;i++){
@@ -278,8 +242,11 @@ int main(){
     // time (make first update be at t=0)
     float t = -0.5*dt;
     
-    int n;
+    FILE * fp;
     
+    fp = fopen("results.txt", "w");
+    clock_t start, stop;
+    start = clock();
     for(n=0 ; n<=nt*2 ; n++){
         // increment time by dt/2
         t=t+0.5*dt;
@@ -289,15 +256,33 @@ int main(){
         t=t+0.5*dt;
         // update the H-field
         Hupdate(Ex,Ey,Ez,Hx,Hy,Hz,&cHxy,&cHxz,&cHyz,&cHyx,&cHzx,&cHzy);
+        
+        // Update the source
+        switch (src.dir) {
+            case 'z':
+                if (src.type=='J')  {sourceUpdate(Ez,&src,&t,&cJ);}
+                else                {sourceUpdate(Hz,&src,&t,&cM);}
+                break;
+            case 'x':
+                if (src.type=='J')  {sourceUpdate(Ex,&src,&t,&cJ);}
+                else                {sourceUpdate(Hx,&src,&t,&cM);}
+                break;
+            case 'y':
+                if (src.type=='J')  {sourceUpdate(Ey,&src,&t,&cJ);}
+                else                {sourceUpdate(Hy,&src,&t,&cM);}
+                break;
+            default:
+                break;
+        }
         // update the sample
         sample[n] = Ez(sloc.i, sloc.j, sloc.k);
-        
-        if(n%100==0){printf("%f\n",sample[n]); }
-        
-        //Flat[x + WIDTH * (y + DEPTH * z)] = Original[x, y, z]
+        fprintf(fp,"%f\n",sample[n]);
     }
+    stop = clock();
     
+    double total = (double)(stop - start)/CLOCKS_PER_SEC;
     
+    printf("\n\nExecution Time: %f\n\n",total);
     
     // Free the E and H field memory
     free(Ex);
